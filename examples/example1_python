@@ -1,0 +1,10 @@
+from src.zebra_lstm import StripedLSTM
+
+# Define model parameters
+input_size = 100
+hidden_size = 200
+num_layers = 2
+num_stripes = 4
+
+# Initialize the model
+model = StripedLSTM(input_size, hidden_size, num_layers, num_stripes)
