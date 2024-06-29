@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Script to install CUDA dependencies
+
+# Update package lists
+sudo apt-get update
+
+# Install CUDA Toolkit
+sudo apt-get install -y cuda
+
+# Verify CUDA installation
+nvcc --version
