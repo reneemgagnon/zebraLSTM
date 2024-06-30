@@ -1,4 +1,4 @@
-# ZebraLSTM
+# ZebraLSTM(TM)
 
 ZebraLSTM is an advanced Long Short-Term Memory (LSTM) architecture designed to optimize the performance of sequential data processing tasks. By dividing the hidden state into multiple parallel stripes, ZebraLSTM enhances computational efficiency and scalability, particularly when leveraging modern GPU architectures.
 
@@ -19,3 +19,5 @@ ZebraLSTM is an advanced Long Short-Term Memory (LSTM) architecture designed to 
 To install dependencies, run:
 ```bash
 pip install -r requirements.txt
+
+Copyright 2024 R Gagnon
