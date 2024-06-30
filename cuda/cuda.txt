@@ -1,0 +1,73 @@
+CUDA Toolkits and Libraries for Striped LSTM Implementation
+
+CUDA Toolkit
+
+Version: Latest stable (e.g., CUDA 11.8 or newer)
+Purpose: Provides the core CUDA development environment
+Components to focus on:
+
+NVCC (NVIDIA CUDA Compiler)
+cuBLAS (GPU-accelerated BLAS library)
+cuDNN (NVIDIA CUDA Deep Neural Network library)
+
+cuBLAS (included in CUDA Toolkit)
+Purpose: Optimized linear algebra operations
+Key functions:
+
+Matrix multiplications (cublasSgemm, cublasHgemm)
+Vector operations (cublasSaxpy, cublasSdot)
+
+
+cuDNN
+Version: Latest compatible with your CUDA version
+Purpose: Optimized primitives for deep learning
+Key functions:
+
+RNN/LSTM operations (cudnnRNNForward, cudnnRNNBackwardData)
+Activation functions (cudnnActivationForward, cudnnActivationBackward)
+
+Thrust
+Included in CUDA Toolkit
+Purpose: High-level parallel algorithms
+Useful for:
+
+Parallel reductions
+Sorting
+Transformations
+
+CUB (CUDA Unbound)
+Part of CUDA Toolkit since version 11.0
+Purpose: Low-level parallel primitives
+Useful for:
+
+Block-level operations
+Device-wide operations
+
+NCCL (NVIDIA Collective Communications Library)
+Purpose: Multi-GPU and multi-node collective communication primitives
+Useful for:
+
+Distributed training across multiple GPUs
+
+CUTLASS (CUDA Templates for Linear Algebra Subroutines)
+Purpose: Collection of CUDA C++ templates for implementing high-performance GEMM computations
+Useful for:
+Custom, high-performance matrix multiplication kernels
+
+NVIDIA Performance Primitives (NPP)
+Included in CUDA Toolkit
+Purpose: GPU-accelerated image, video, and signal processing functions
+Potentially useful for:
+Preprocessing of input data
+
+CUDA Math API
+Included in CUDA Toolkit
+Purpose: Mathematical functions optimized for GPU
+Useful for:
+Implementing custom activation functions
+
+Nsight Systems and Nsight Compute
+Purpose: Profiling and optimization tools
+Useful for:
+Identifying performance bottlenecks
+Optimizing kernel launches and memory transfers
