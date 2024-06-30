@@ -5,17 +5,10 @@ This script is dual-licensed. See the LICENSE.md file for details.
 For non-commercial and research use: CC BY-NC 4.0
 For commercial use: Contact renee@freedomfamilyconsulting.ca
 """
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
-import math
-from torchtext.datasets import IMDB
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator
-from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_sequence
-from tqdm import tqdm
 
 class StripedLSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size, num_stripes):
@@ -25,6 +18,7 @@ class StripedLSTMCell(nn.Module):
         self.num_stripes = num_stripes
         self.stripe_size = hidden_size // num_stripes
 
+        # Create weight matrices for each stripe
         self.weight_ih = nn.ParameterList([
             nn.Parameter(torch.Tensor(4 * self.stripe_size, input_size))
             for _ in range(num_stripes)
@@ -45,6 +39,7 @@ class StripedLSTMCell(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
+        """Initialize parameters using the method described in "Delving deep into rectifiers" """
         for i in range(self.num_stripes):
             nn.init.kaiming_uniform_(self.weight_ih[i], a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.weight_hh[i], a=math.sqrt(5))
@@ -54,30 +49,46 @@ class StripedLSTMCell(nn.Module):
             nn.init.uniform_(self.bias_hh[i], -bound, bound)
 
     def forward(self, input, hidden):
+        """
+        Forward pass of the StripedLSTMCell.
+        
+        Args:
+            input (Tensor): Input tensor of shape (batch_size, input_size)
+            hidden (tuple): Tuple containing (h_0, c_0) of shape (batch_size, hidden_size)
+        
+        Returns:
+            tuple: New (h_1, c_1) tensors
+        """
         h_0, c_0 = hidden
         h_1 = []
         c_1 = []
 
         for i in range(self.num_stripes):
+            # Get the stripe of the hidden state and cell state
             h_0_stripe = h_0[:, i*self.stripe_size:(i+1)*self.stripe_size]
             c_0_stripe = c_0[:, i*self.stripe_size:(i+1)*self.stripe_size]
 
+            # Compute gate inputs
             gates = F.linear(input, self.weight_ih[i], self.bias_ih[i]) + \
                     F.linear(h_0_stripe, self.weight_hh[i], self.bias_hh[i])
 
+            # Slice gates into i, f, g, o
             i_gate, f_gate, g_gate, o_gate = gates.chunk(4, 1)
 
+            # Apply activations
             i_gate = torch.sigmoid(i_gate)
             f_gate = torch.sigmoid(f_gate)
             g_gate = torch.tanh(g_gate)
             o_gate = torch.sigmoid(o_gate)
 
+            # Compute new cell state and hidden state
             c_1_stripe = f_gate * c_0_stripe + i_gate * g_gate
             h_1_stripe = o_gate * torch.tanh(c_1_stripe)
 
             h_1.append(h_1_stripe)
             c_1.append(c_1_stripe)
 
+        # Concatenate stripes
         h_1 = torch.cat(h_1, dim=1)
         c_1 = torch.cat(c_1, dim=1)
 
@@ -92,6 +103,7 @@ class StripedLSTM(nn.Module):
         self.num_stripes = num_stripes
         self.dropout = dropout
 
+        # Create LSTM layers
         self.lstm_layers = nn.ModuleList([
             StripedLSTMCell(
                 input_size if i == 0 else hidden_size,
@@ -102,6 +114,17 @@ class StripedLSTM(nn.Module):
         ])
 
     def forward(self, input, hidden=None):
+        """
+        Forward pass of the StripedLSTM.
+        
+        Args:
+            input (Tensor): Input tensor of shape (seq_len, batch_size, input_size)
+            hidden (tuple): Initial hidden state. If None, initialized with zeros.
+        
+        Returns:
+            tuple: (output, (h_n, c_n)) where output is the output of the last layer for each time step,
+                   and (h_n, c_n) is the final hidden state for each layer
+        """
         is_packed = isinstance(input, nn.utils.rnn.PackedSequence)
         if is_packed:
             input, batch_sizes = input.data, input.batch_sizes
@@ -153,106 +176,24 @@ class StripedLSTM(nn.Module):
         return output, (h_n, c_n)
 
     def init_hidden(self, batch_size):
+        """Initialize hidden states"""
         weight = next(self.parameters()).data
         return [(weight.new(batch_size, self.hidden_size).zero_(),
                  weight.new(batch_size, self.hidden_size).zero_())
                 for _ in range(self.num_layers)]
 
-class SentimentClassifier(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_dim, num_layers, num_stripes, num_classes):
-        super(SentimentClassifier, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.lstm = StripedLSTM(embed_dim, hidden_dim, num_layers, num_stripes)
-        self.fc = nn.Linear(hidden_dim, num_classes)
+# Usage example
+input_size = 100
+hidden_size = 200
+num_layers = 2
+num_stripes = 4
+batch_size = 32
+seq_length = 50
 
-    def forward(self, text):
-        embedded = self.embedding(text)
-        output, (hidden, cell) = self.lstm(embedded)
-        return self.fc(hidden[-1])
+model = StripedLSTM(input_size, hidden_size, num_layers, num_stripes)
+input_data = torch.randn(seq_length, batch_size, input_size)
+output, (h_n, c_n) = model(input_data)
 
-# Data preparation
-tokenizer = get_tokenizer('basic_english')
-
-def yield_tokens(data_iter):
-    for _, text in data_iter:
-        yield tokenizer(text)
-
-train_iter = IMDB(split='train')
-vocab = build_vocab_from_iterator(yield_tokens(train_iter), specials=['<unk>'])
-vocab.set_default_index(vocab['<unk>'])
-
-def collate_batch(batch):
-    label_list, text_list = [], []
-    for (_label, _text) in batch:
-        label_list.append(_label)
-        processed_text = torch.tensor(vocab(tokenizer(_text)), dtype=torch.int64)
-        text_list.append(processed_text)
-    label_list = torch.tensor(label_list, dtype=torch.int64)
-    text_list = pad_sequence(text_list, batch_first=True, padding_value=0)
-    return label_list.to(device), text_list.to(device)
-
-# Hyperparameters
-VOCAB_SIZE = len(vocab)
-EMBED_DIM = 256
-HIDDEN_DIM = 256
-NUM_LAYERS = 2
-NUM_STRIPES = 4
-NUM_CLASSES = 2
-LEARNING_RATE = 0.001
-BATCH_SIZE = 64
-NUM_EPOCHS = 5
-
-# Device configuration
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-# Initialize the model
-model = SentimentClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_LAYERS, NUM_STRIPES, NUM_CLASSES).to(device)
-
-# Loss and optimizer
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-# Mixed precision training setup
-scaler = GradScaler()
-
-# Training loop
-train_iter = IMDB(split='train')
-test_iter = IMDB(split='test')
-
-train_dataloader = DataLoader(train_iter, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_batch)
-test_dataloader = DataLoader(test_iter, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_batch)
-
-for epoch in range(NUM_EPOCHS):
-    model.train()
-    total_acc, total_count = 0, 0
-    
-    for idx, (labels, text) in enumerate(tqdm(train_dataloader)):
-        optimizer.zero_grad()
-        
-        with autocast():
-            predicted_label = model(text)
-            loss = criterion(predicted_label, labels)
-        
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        
-        total_acc += (predicted_label.argmax(1) == labels).sum().item()
-        total_count += labels.size(0)
-        
-        if idx % 100 == 0:
-            print(f'Epoch: {epoch}, Batch: {idx}, Loss: {loss.item():.4f}, Accuracy: {total_acc/total_count:.4f}')
-    
-    print(f'Epoch: {epoch}, Train Accuracy: {total_acc/total_count:.4f}')
-
-# Evaluation
-model.eval()
-total_acc, total_count = 0, 0
-
-with torch.no_grad():
-    for idx, (labels, text) in enumerate(tqdm(test_dataloader)):
-        predicted_label = model(text)
-        total_acc += (predicted_label.argmax(1) == labels).sum().item()
-        total_count += labels.size(0)
-
-print(f'Test Accuracy: {total_acc/total_count:.4f}')
+print(f"Output shape: {output.shape}")
+print(f"h_n shape: {h_n.shape}")
+print(f"c_n shape: {c_n.shape}")
